@@ -4,36 +4,69 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/base64"
+
+	log "github.com/sirupsen/logrus"
 )
 
-// PKCS5Padding adds padding to the plaintext for AES encryption
+// AesEncrypt performs AES encryption on the input string using the provided key.
+func AesEncrypt(src, key string) ([]byte, error) {
+	block, err := aes.NewCipher([]byte(key))
+	if err != nil {
+		log.Error("AesEncrypt Error: ", err)
+		return nil, err
+	}
+	if src == "" {
+		log.Info("AesEncrypt Src Empty")
+		return nil, nil
+	}
+	ecb := NewECBEncrypter(block)
+	content := []byte(src)
+	content = PKCS5Padding(content, block.BlockSize())
+	crypted := make([]byte, len(content))
+	ecb.CryptBlocks(crypted, content)
+	return crypted, nil
+}
+
+// PKCS5Padding pads the ciphertext to be a multiple of blockSize according to PKCS5 padding scheme.
 func PKCS5Padding(ciphertext []byte, blockSize int) []byte {
 	padding := blockSize - len(ciphertext)%blockSize
 	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
 	return append(ciphertext, padtext...)
 }
 
-// PKCS5Unpadding removes padding from the plaintext after AES decryption
-func PKCS5Unpadding(plaintext []byte) []byte {
-	length := len(plaintext)
-	unpadding := int(plaintext[length-1])
-	return plaintext[:(length - unpadding)]
+// GetEncryptedData encrypts each string in requestData using AES and returns a slice of base64-encoded encrypted strings.
+func GetEncryptedData(requestData []string, secretKey string) ([]string, error) {
+	decodedSecretKey, _ := base64.URLEncoding.DecodeString(secretKey)
+
+	var encodedDataOutput []string
+	for _, plainText := range requestData {
+		crypted, err := AesEncrypt(plainText, string(decodedSecretKey))
+		if err == nil {
+			encodedData := base64.StdEncoding.EncodeToString(crypted)
+			encodedDataOutput = append(encodedDataOutput, encodedData)
+		}
+	}
+
+	return encodedDataOutput, nil
 }
 
-// ecbEncrypter implements cipher.BlockMode for ECB encryption
+// ecbEncrypter implements the ECB mode encryption using the given cipher.Block.
 type ecbEncrypter struct {
 	b cipher.Block
 }
 
-// NewECBEncrypter creates an ECB encrypter from the given block
+// NewECBEncrypter creates a new ECB mode encrypter based on the provided block cipher.
 func NewECBEncrypter(b cipher.Block) cipher.BlockMode {
 	return &ecbEncrypter{b: b}
 }
 
+// BlockSize returns the block size of the underlying block cipher.
 func (x *ecbEncrypter) BlockSize() int {
 	return x.b.BlockSize()
 }
 
+// CryptBlocks encrypts full blocks of plaintext into ciphertext using ECB mode.
 func (x *ecbEncrypter) CryptBlocks(dst, src []byte) {
 	if len(src)%x.b.BlockSize() != 0 {
 		panic("crypto/cipher: input not full blocks")
@@ -45,68 +78,5 @@ func (x *ecbEncrypter) CryptBlocks(dst, src []byte) {
 		x.b.Encrypt(dst, src[:x.b.BlockSize()])
 		src = src[x.b.BlockSize():]
 		dst = dst[x.b.BlockSize():]
-	}
-}
-
-// AesEncrypt encrypts plaintext using AES ECB mode with PKCS5 padding
-func AesEncrypt(plainText string, key string) ([]byte, error) {
-	block, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		return nil, err
-	}
-
-	plaintext := []byte(plainText)
-	plaintext = PKCS5Padding(plaintext, block.BlockSize())
-
-	ciphertext := make([]byte, len(plaintext))
-	ecb := NewECBEncrypter(block)
-	ecb.CryptBlocks(ciphertext, plaintext)
-
-	return ciphertext, nil
-}
-
-// AesDecrypt decrypts ciphertext using AES ECB mode with PKCS5 padding
-func AesDecrypt(ciphertext []byte, key string) (string, error) {
-	block, err := aes.NewCipher([]byte(key))
-	if err != nil {
-		return "", err
-	}
-
-	ecb := NewECBDecrypter(block)
-	plaintext := make([]byte, len(ciphertext))
-	ecb.CryptBlocks(plaintext, ciphertext)
-
-	plaintext = PKCS5Unpadding(plaintext)
-
-	return string(plaintext), nil
-}
-
-// ecbDecrypter implements cipher.BlockMode for ECB decryption
-type ecbDecrypter struct {
-	b         cipher.Block
-	blockSize int
-}
-
-// NewECBDecrypter creates an ECB decrypter from the given block
-func NewECBDecrypter(b cipher.Block) cipher.BlockMode {
-	return &ecbDecrypter{
-		b:         b,
-		blockSize: b.BlockSize(),
-	}
-}
-
-func (x *ecbDecrypter) BlockSize() int { return x.blockSize }
-
-func (x *ecbDecrypter) CryptBlocks(dst, src []byte) {
-	if len(src)%x.blockSize != 0 {
-		panic("crypto/cipher: input not full blocks")
-	}
-	if len(dst) < len(src) {
-		panic("crypto/cipher: output smaller than input")
-	}
-	for len(src) > 0 {
-		x.b.Decrypt(dst, src[:x.blockSize])
-		src = src[x.blockSize:]
-		dst = dst[x.blockSize:]
 	}
 }
