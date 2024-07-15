@@ -8,7 +8,10 @@ import (
 
 	log "github.com/sirupsen/logrus"
 )
-
+func DataEncrypt(input string, key string) string {
+    encData, _ := GetEncryptedData([]string{input}, key)
+    return encData[0]
+}
 // AesEncrypt performs AES encryption on the input string using the provided key.
 func AesEncrypt(src, key string) ([]byte, error) {
 	block, err := aes.NewCipher([]byte(key))
