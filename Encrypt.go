@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -35,7 +33,7 @@ func UnprocessableEntity(c *gin.Context, Message string) {
 	c.AbortWithStatusJSON(http.StatusUnprocessableEntity, response)
 }
 
-// encryptMapValues encrypts all values in a map using AES-256 encryption with the given key.
+// EncryptMapValues encrypts all values in a map using AES-256 encryption with the given key.
 func EncryptMapValues(input map[string]interface{}, key []byte) (map[string]string, error) {
 	result := make(map[string]string)
 
@@ -54,36 +52,68 @@ func EncryptMapValues(input map[string]interface{}, key []byte) (map[string]stri
 }
 
 // EncryptAES encrypts plainText using AES-256 encryption with the given key.
+// func EncryptAES(plainText string, key []byte) (string, error) {
+// 	block, err := aes.NewCipher(key)
+// 	if err != nil {
+// 		return "", err
+// 	}
+
+// 	plaintext := []byte(plainText)
+// 	plaintext = PKCS5Padding(plaintext, block.BlockSize())
+
+// 	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
+// 	iv := ciphertext[:aes.BlockSize]
+// 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+// 		return "", err
+// 	}
+
+// 	mode := cipher.NewCBCEncrypter(block, iv)
+// 	mode.CryptBlocks(ciphertext[aes.BlockSize:], plaintext)
+
+// 	return base64.StdEncoding.EncodeToString(ciphertext), nil
+// }
+
 func EncryptAES(plainText string, key []byte) (string, error) {
-	// Create a new AES cipher block with the given key.
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
 
-	// Ensure the plaintext is a multiple of the block size
 	plaintext := []byte(plainText)
-	// It pads the plainText to ensure its length is a multiple of the AES block size using PKCS5Padding.
 	plaintext = PKCS5Padding(plaintext, block.BlockSize())
-	
-	//It initializes a byte slice ciphertext to store the encrypted data.
-	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
-	// It generates a random Initialization Vector (IV) of the AES block size length and prepends it to ciphertext.
-	iv := ciphertext[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return "", err
-	}
 
-	//It creates a CBC (Cipher Block Chaining) encrypter mode using the AES block and the IV.
-	mode := cipher.NewCBCEncrypter(block, iv)
-	//It encrypts the padded plaintext using mode.CryptBlocks and stores the result in ciphertext.
-	mode.CryptBlocks(ciphertext[aes.BlockSize:], plaintext)
+	ciphertext := make([]byte, len(plaintext))
+	// ECB mode does not use IV
+	mode := NewECBEncrypter(block)
+	mode.CryptBlocks(ciphertext, plaintext)
 
-	//it encodes ciphertext in Base64 and returns it as a string, along with nil error if successful.
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// PKCS7Padding pads the plaintext to be a multiple of the block size.
+// NewECBEncrypter creates an ECB encrypter from the given block
+func NewECBEncrypter(block cipher.Block) cipher.BlockMode {
+	return &ecbEncrypter{block}
+}
+
+type ecbEncrypter struct {
+	block cipher.Block
+}
+
+func (x *ecbEncrypter) BlockSize() int {
+	return x.block.BlockSize()
+}
+
+func (x *ecbEncrypter) CryptBlocks(dst, src []byte) {
+	// Encrypt each block individually
+	if len(src)%x.block.BlockSize() != 0 {
+		panic("crypto/cipher: input not full blocks")
+	}
+	for i := 0; i < len(src); i += x.block.BlockSize() {
+		x.block.Encrypt(dst[i:i+x.block.BlockSize()], src[i:i+x.block.BlockSize()])
+	}
+}
+
+// PKCS5Padding pads the plaintext to be a multiple of the block size.
 func PKCS5Padding(plaintext []byte, blockSize int) []byte {
 	padding := blockSize - len(plaintext)%blockSize
 	padText := bytes.Repeat([]byte{byte(padding)}, padding)
