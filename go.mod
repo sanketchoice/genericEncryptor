@@ -1,4 +1,4 @@
-module genericEncryptor
+module github.com/sanketchoice/genericEncryptor
 
 go 1.22.5
 
