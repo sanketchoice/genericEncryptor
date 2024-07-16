@@ -34,14 +34,18 @@ func UnprocessableEntity(c *gin.Context, Message string) {
 
 // AesEncrypt encrypts the input using AES in ECB mode with PKCS5 padding.
 func AesEncrypt(src, key string) ([]byte, error) {
+	if len(key) == 0 {
+		logrus.Info("AesEncrypt: Key is empty")
+		return nil, nil // Returning nil, nil indicates no error occurred
+	}
 	block, err := aes.NewCipher([]byte(key))
 	if err != nil {
-		logrus.Error("AesEncrypt Error: ", err)
+		logrus.Info("AesEncrypt: Error creating cipher block - ", err)
 		return nil, err
 	}
 	if src == "" {
-		logrus.Info("AesEncrypt Src Empty")
-		return nil, nil
+		logrus.Info("AesEncrypt: Source is empty")
+		return nil, nil // Returning nil, nil indicates no error occurred
 	}
 	ecb := NewECBEncrypter(block)
 	content := []byte(src)
@@ -51,7 +55,6 @@ func AesEncrypt(src, key string) ([]byte, error) {
 	return crypted, nil
 }
 
-// NewECBEncrypter creates a new ECB encrypter instance.
 func NewECBEncrypter(b cipher.Block) cipher.BlockMode {
 	return &ecbEncrypter{b: b}
 }
@@ -66,10 +69,10 @@ func (x *ecbEncrypter) BlockSize() int {
 
 func (x *ecbEncrypter) CryptBlocks(dst, src []byte) {
 	if len(src)%x.b.BlockSize() != 0 {
-		panic("crypto/cipher: input not full blocks")
+		logrus.Info("crypto/cipher: input not full blocks")
 	}
 	if len(dst) < len(src) {
-		panic("crypto/cipher: output smaller than input")
+		logrus.Info("crypto/cipher: output smaller than input")
 	}
 	for len(src) > 0 {
 		x.b.Encrypt(dst, src[:x.b.BlockSize()])
@@ -78,29 +81,36 @@ func (x *ecbEncrypter) CryptBlocks(dst, src []byte) {
 	}
 }
 
-// PKCS5Padding adds PKCS5 padding to the input.
 func PKCS5Padding(ciphertext []byte, blockSize int) []byte {
 	padding := blockSize - len(ciphertext)%blockSize
 	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
 	return append(ciphertext, padtext...)
 }
 
-// DataEncrypt encrypts a single string input using the specified key.
-func DataEncrypt(input string, key string) string {
-	encData, _ := GetEncryptedData([]string{input}, key)
-	return encData[0]
+func DataEncrypt(input string, key string) (string, error) {
+	encData, err := GetEncryptedData([]string{input}, key)
+	if err != nil {
+		return "", err
+	}
+	return encData[0], nil
 }
 
-// GetEncryptedData encrypts multiple strings using the specified key.
 func GetEncryptedData(requestData []string, secretKey string) ([]string, error) {
-	decodedSecretKey, _ := base64.URLEncoding.DecodeString(secretKey)
+	decodedSecretKey, err := base64.URLEncoding.DecodeString(secretKey)
+	if err != nil {
+		logrus.Info("GetEncryptedData: Error decoding secret key - ", err)
+		return nil, err
+	}
+
 	var encodedDataOutput []string
 	for _, plainText := range requestData {
 		crypted, err := AesEncrypt(plainText, string(decodedSecretKey))
-		if err == nil {
-			encodedData := base64.StdEncoding.EncodeToString(crypted)
-			encodedDataOutput = append(encodedDataOutput, encodedData)
+		if err != nil {
+			logrus.Info("GetEncryptedData: Error encrypting data - ", err)
+			continue // Skip current plaintext if encryption fails
 		}
+		encodedData := base64.StdEncoding.EncodeToString(crypted)
+		encodedDataOutput = append(encodedDataOutput, encodedData)
 	}
 	return encodedDataOutput, nil
 }
