@@ -1,26 +1,46 @@
 package genericEncryptor
-
 import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"net/http"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
-func DataEncrypt(input string, key string) string {
-    encData, _ := GetEncryptedData([]string{input}, key)
-    return encData[0]
+
+type ResponseBody struct {
+	StatusCode int
+	Message    string
+	Body       map[string]string
 }
-// AesEncrypt performs AES encryption on the input string using the provided key.
+
+func BadRequest(c *gin.Context, Message string) {
+	response := ResponseBody{
+		StatusCode: http.StatusBadRequest,
+		Message:    Message,
+	}
+	c.AbortWithStatusJSON(http.StatusBadRequest, response)
+}
+
+func UnprocessableEntity(c *gin.Context, Message string) {
+	response := ResponseBody{
+		StatusCode: http.StatusUnprocessableEntity,
+		Message:    Message,
+	}
+	c.AbortWithStatusJSON(http.StatusUnprocessableEntity, response)
+}
+
+// AesEncrypt encrypts the input using AES in ECB mode with PKCS5 padding.
 func AesEncrypt(src, key string) ([]byte, error) {
 	block, err := aes.NewCipher([]byte(key))
 	if err != nil {
-		log.Error("AesEncrypt Error: ", err)
+		logrus.Error("AesEncrypt Error: ", err)
 		return nil, err
 	}
 	if src == "" {
-		log.Info("AesEncrypt Src Empty")
+		logrus.Info("AesEncrypt Src Empty")
 		return nil, nil
 	}
 	ecb := NewECBEncrypter(block)
@@ -31,45 +51,19 @@ func AesEncrypt(src, key string) ([]byte, error) {
 	return crypted, nil
 }
 
-// PKCS5Padding pads the ciphertext to be a multiple of blockSize according to PKCS5 padding scheme.
-func PKCS5Padding(ciphertext []byte, blockSize int) []byte {
-	padding := blockSize - len(ciphertext)%blockSize
-	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
-	return append(ciphertext, padtext...)
-}
-
-// GetEncryptedData encrypts each string in requestData using AES and returns a slice of base64-encoded encrypted strings.
-func GetEncryptedData(requestData []string, secretKey string) ([]string, error) {
-	decodedSecretKey, _ := base64.URLEncoding.DecodeString(secretKey)
-
-	var encodedDataOutput []string
-	for _, plainText := range requestData {
-		crypted, err := AesEncrypt(plainText, string(decodedSecretKey))
-		if err == nil {
-			encodedData := base64.StdEncoding.EncodeToString(crypted)
-			encodedDataOutput = append(encodedDataOutput, encodedData)
-		}
-	}
-
-	return encodedDataOutput, nil
-}
-
-// ecbEncrypter implements the ECB mode encryption using the given cipher.Block.
-type ecbEncrypter struct {
-	b cipher.Block
-}
-
-// NewECBEncrypter creates a new ECB mode encrypter based on the provided block cipher.
+// NewECBEncrypter creates a new ECB encrypter instance.
 func NewECBEncrypter(b cipher.Block) cipher.BlockMode {
 	return &ecbEncrypter{b: b}
 }
 
-// BlockSize returns the block size of the underlying block cipher.
+type ecbEncrypter struct {
+	b cipher.Block
+}
+
 func (x *ecbEncrypter) BlockSize() int {
 	return x.b.BlockSize()
 }
 
-// CryptBlocks encrypts full blocks of plaintext into ciphertext using ECB mode.
 func (x *ecbEncrypter) CryptBlocks(dst, src []byte) {
 	if len(src)%x.b.BlockSize() != 0 {
 		panic("crypto/cipher: input not full blocks")
@@ -82,4 +76,31 @@ func (x *ecbEncrypter) CryptBlocks(dst, src []byte) {
 		src = src[x.b.BlockSize():]
 		dst = dst[x.b.BlockSize():]
 	}
+}
+
+// PKCS5Padding adds PKCS5 padding to the input.
+func PKCS5Padding(ciphertext []byte, blockSize int) []byte {
+	padding := blockSize - len(ciphertext)%blockSize
+	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
+	return append(ciphertext, padtext...)
+}
+
+// DataEncrypt encrypts a single string input using the specified key.
+func DataEncrypt(input string, key string) string {
+	encData, _ := GetEncryptedData([]string{input}, key)
+	return encData[0]
+}
+
+// GetEncryptedData encrypts multiple strings using the specified key.
+func GetEncryptedData(requestData []string, secretKey string) ([]string, error) {
+	decodedSecretKey, _ := base64.URLEncoding.DecodeString(secretKey)
+	var encodedDataOutput []string
+	for _, plainText := range requestData {
+		crypted, err := AesEncrypt(plainText, string(decodedSecretKey))
+		if err == nil {
+			encodedData := base64.StdEncoding.EncodeToString(crypted)
+			encodedDataOutput = append(encodedDataOutput, encodedData)
+		}
+	}
+	return encodedDataOutput, nil
 }
